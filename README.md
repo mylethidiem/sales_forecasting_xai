@@ -32,6 +32,13 @@
 * **Interactive Streamlit App:**
   A web interface (`app.py`) that enables users to explore store-level forecasts and historical trends.
 
+## Deliverables
+
+- Trained LightGBM model
+- SHAP explainability visuals
+- Streamlit app for predictions
+- 📄 [SHAP Analysis Summary Report](docs/shap_analysis_summary_report.md)
+
 ## Project Structure
 
 ```bash
