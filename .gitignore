@@ -43,7 +43,7 @@ venv.bak/
 .DS_Store
 
 # Environment files
-environment*.yml
+# environment*.yml
 
 # Data files
 data/*.csv
@@ -51,7 +51,6 @@ data/*.feather
 data/*.xlsx
 
 # Output and figures
-figures/
 check_data/
 models/
 *.log

@@ -47,26 +47,28 @@
 │   ├── weather_data.csv
 │   └── weather_preprocessed.csv
 ├── docs/
-│   └── project_description_poc_phase.md
+│   ├── project_description_poc_phase.md  # Project detail description
+│   └── shap_analysis_summary_report.md   # Quick summary of SHAP results
 ├── environment.yml                 # Environment for most systems
-├── environment_macm1.yml          # Environment for Mac M1 chip
+├── environment_macm1.yml           # Environment for Mac M1 chip
+├── requirements.txt                # Nessesary libraries
 ├── figures/                        # SHAP plots and EDA visuals
 ├── models/
 │   ├── feature_stats.json
 │   └── sales_forecast_model.pkl   # Trained model
-├── notebooks/
-│   ├── 01_preprocessing.ipynb
-│   ├── 02_EDA.ipynb
-│   ├── 03_feature_engineering.ipynb
-│   ├── 04_modelling.ipynb
-│   └── 05_explain_model.ipynb
+├── notebooks/                     # Main work for PoC phase is based on Notebooks
+│   ├── 01_preprocessing.ipynb      # Proprocessing notebook
+│   ├── 02_EDA.ipynb                # EDA notebook
+│   ├── 03_feature_engineering.ipynb   # Feature engineer
+│   ├── 04_modelling.ipynb          # Model training (base line: Prophet and better: Light GBM)
+│   └── 05_explain_model.ipynb      # Explainable AI
 ├── src/                            # Modular source code
 │   ├── data_loader/
 │   ├── data_generator/
 │   ├── ui_builder/
 │   ├── ui_predictor/
 │   └── utils/
-└── README.md                       # This file
+└── README.md
 ```
 
 ## Installation
@@ -76,7 +78,6 @@
    ```bash
    git clone https://github.com/nguyenhads/sales_forecasting_xai.git
    cd sales_forecasting_xai
-
    ```
 
 2. **Set Up Environment**
@@ -95,7 +96,40 @@
   conda activate sales_forecast
   ```
 
-3. **Run the Streamlit App**
+  _You need to install Anaconda for this setup. If not, please use the below setup instead._
+
+- Create a virtual environment using pure python
+
+  ```
+  python -m venv .venv
+
+  # On macOS/Linux:
+  source .venv/bin/activate
+
+  # On Windows:
+  .venv\Scripts\activate
+
+  pip install -r requirements.txt
+  ```
+
+3. **Run the notebooks**
+
+- After activating virtual enviroments
+
+  ```bash
+  jupyter lab
+  ```
+
+4. **Generate your all dataset**
+
+- If you preferer generating your all dataset, you can change the range of data as well as the outlier and nan values ratio.
+- In this case, modify `src/data_generator/data_generator.py `, and in below `sales_forecasting_xai` folder, run the below command
+
+  ```bash
+  python src/data_generator/data_generator.py
+  ```
+
+5. **Run the Streamlit App**
    ```bash
    streamlit run app.py
    ```

@@ -1,0 +1,27 @@
+name: sales_forecast
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip>=23.3
+  - pandas>=2.1.3
+  - numpy>=1.26.2
+  - matplotlib>=3.8.2
+  - seaborn>=0.13.0
+  - scikit-learn>=1.3.2
+  - lightgbm>=4.1.0
+  - shap>=0.44.0
+  - streamlit>=1.29.0
+  - plotly>=5.18.0
+  - optuna>=3.5.0
+  - jupyter>=1.0.0
+  - libblas=*=*accelerate
+  - libcblas=*=*accelerate
+  - liblapack=*=*accelerate
+  - llvm-openmp
+  - utf8proc
+  - pyarrow
+  - prophet
+  - pip:
+      - holidays>=0.35
