@@ -74,8 +74,9 @@
 1. **Clone the Repository**
 
    ```bash
-   git clone https://github.com/your-username/sales-forecasting-xai.git
-   cd sales-forecasting-xai
+   git clone https://github.com/nguyenhads/sales_forecasting_xai.git
+   cd sales_forecasting_xai
+
    ```
 
 2. **Set Up Environment**
@@ -84,14 +85,14 @@
 
   ```bash
   conda env create -f environment.yml
-  conda activate sales-xai
+  conda activate sales_forecast
   ```
 
 - For Mac M1:
 
   ```bash
   conda env create -f environment_macm1.yml
-  conda activate sales-xai
+  conda activate sales_forecast
   ```
 
 3. **Run the Streamlit App**
