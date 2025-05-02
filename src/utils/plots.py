@@ -5,13 +5,8 @@ import seaborn as sns
 
 
 def plot_sales(df, store_id=1, item_id=1):
-    """Plot sales and visualize missing values
+    """Plot sales and visualize missing values"""
 
-    Args:
-        df (_type_): _description_
-        store_id (int, optional): _description_. Defaults to 1.
-        item_id (int, optional): _description_. Defaults to 1.
-    """
     df_2plot = df.query("(store_id==@store_id)&(item_id==@item_id)")
     store_name = df_2plot["store_name"].iloc[-1]
     item_name = df_2plot["item_name"].iloc[-1]

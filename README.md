@@ -34,10 +34,10 @@
 
 ## Deliverables
 
+- 5 comprehensive notebooks for data processing, feature engineering, modelling and evaluation
 - Trained LightGBM model
-- SHAP explainability visuals
+- SHAP explainability visuals - 📄 [SHAP Analysis Summary Report](docs/shap_analysis_summary_report.md)
 - Streamlit app for predictions
-- 📄 [SHAP Analysis Summary Report](docs/shap_analysis_summary_report.md)
 
 ## Project Structure
 
