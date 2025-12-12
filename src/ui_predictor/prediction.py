@@ -1,25 +1,30 @@
 from datetime import datetime, timedelta
-from typing import Dict, Any, Tuple, Optional
-import io
-import base64
 
 import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend for Gradio
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import gradio as gr
 
 
-def create_sales_prediction_interface(data, model, feature_stats, feature_engineered_data):
-    """Create Gradio interface for sales prediction"""
+def sales_prediction_view(data, model, feature_stats, feature_engineered_data):
+    """Display the sales prediction tool interface"""
 
     if model is None:
-        return gr.Markdown("⚠️ **Error:** Model not loaded. Please check if the model file exists.")
+        return gr.Interface(
+            fn=lambda: "Model not loaded. Please check if the model file exists.",
+            inputs=[],
+            outputs=gr.Textbox(label="Error"),
+            title="Sales Prediction Tool"
+        )
 
     if feature_engineered_data.empty:
-        return gr.Markdown("⚠️ **Error:** Feature engineered data not loaded.")
+        return gr.Interface(
+            fn=lambda: "Feature engineered data not loaded.",
+            inputs=[],
+            outputs=gr.Textbox(label="Error"),
+            title="Sales Prediction Tool"
+        )
 
     # Determine store and item column names
     store_col = "store_id" if "store_id" in feature_engineered_data.columns else "store"
@@ -37,148 +42,113 @@ def create_sales_prediction_interface(data, model, feature_stats, feature_engine
     # Get unique store and item lists
     stores = sorted(feature_engineered_data[store_col].unique())
 
-    # Prepare store options
+    # Create store options
     if has_store_names:
         store_options = [f"{store_id} - {store_names[store_id]}" for store_id in stores]
     else:
-        store_options = [str(store_id) for store_id in stores]
+        store_options = stores
 
     def update_items(store_selection):
         """Update item dropdown based on selected store"""
-        # Extract store_id from selection
         if has_store_names:
             store_id = int(store_selection.split(" - ")[0])
         else:
-            store_id = int(store_selection)
+            store_id = store_selection
 
-        # Get items for selected store
         store_items = feature_engineered_data[feature_engineered_data[store_col] == store_id][item_col].unique()
 
-        # Prepare item options
         if has_item_names:
             item_options = [
                 f"{item_id} - {item_names[item_id]}"
-                for item_id in sorted(store_items)
+                for item_id in store_items
                 if item_id in item_names
             ]
         else:
-            item_options = [str(item_id) for item_id in sorted(store_items)]
+            item_options = sorted(store_items)
 
-        return gr.Dropdown(choices=item_options, value=item_options[0] if item_options else None)
+        return gr.Dropdown(choices=item_options)
 
-    def make_prediction(
-        store_selection,
-        item_selection,
-        prediction_date,
-        is_holiday,
-        special_event,
-        special_event_impact,
-        temperature,
-        weather_condition,
-        humidity,
-        competition_level,
-        supply_chain
-    ):
-        """Generate sales prediction"""
-        try:
-            # Extract IDs from selections
-            if has_store_names:
-                store_id = int(store_selection.split(" - ")[0])
-            else:
-                store_id = int(store_selection)
+    def predict_sales(store_selection, item_selection, prediction_date, is_holiday,
+                     special_event, promotion_impact, event_impact, clearance_impact,
+                     launch_impact, temperature, weather_condition, humidity,
+                     competition_level, supply_chain):
+        """Wrapper function for prediction with all inputs"""
 
-            if has_item_names:
-                item_id = int(item_selection.split(" - ")[0])
-            else:
-                item_id = int(item_selection)
+        # Parse store and item IDs
+        if has_store_names:
+            store_id = int(store_selection.split(" - ")[0])
+        else:
+            store_id = store_selection
 
-            # Parse date
-            if isinstance(prediction_date, str):
-                pred_date = datetime.strptime(prediction_date, "%Y-%m-%d").date()
-            else:
-                pred_date = prediction_date
+        if has_item_names:
+            item_id = int(item_selection.split(" - ")[0])
+        else:
+            item_id = item_selection
 
-            # Calculate derived parameters
-            prediction_inputs = calculate_prediction_parameters(
-                pred_date,
-                is_holiday,
-                special_event,
-                special_event_impact,
-                temperature,
-                weather_condition,
-                humidity,
-                competition_level,
-                supply_chain
-            )
+        # Collect prediction inputs
+        prediction_inputs = collect_prediction_inputs_from_values(
+            prediction_date, is_holiday, special_event, promotion_impact,
+            event_impact, clearance_impact, launch_impact, temperature,
+            weather_condition, humidity, competition_level, supply_chain
+        )
 
-            # Generate prediction
-            result_html, plot1, plot2, plot3 = generate_prediction(
-                feature_engineered_data,
-                model,
-                store_id,
-                item_id,
-                store_col,
-                item_col,
-                prediction_inputs,
-                has_store_names,
-                has_item_names,
-                store_names,
-                item_names,
-            )
+        # Generate prediction and return results
+        return generate_prediction(
+            feature_engineered_data,
+            model,
+            store_id,
+            item_id,
+            store_col,
+            item_col,
+            prediction_inputs,
+            has_store_names,
+            has_item_names,
+            store_names,
+            item_names,
+        )
 
-            return result_html, plot1, plot2, plot3
+    # Get initial items for first store
+    initial_store = store_options[0] if store_options else None
+    if initial_store:
+        if has_store_names:
+            initial_store_id = int(initial_store.split(" - ")[0])
+        else:
+            initial_store_id = initial_store
 
-        except Exception as e:
-            error_html = f"""
-            <div style='padding: 20px; background-color: #fee; border: 1px solid #c00; border-radius: 5px;'>
-                <h3>❌ Error Making Prediction</h3>
-                <p>{str(e)}</p>
-                <p><small>Please ensure all inputs are valid and historical data exists for this store-item combination.</small></p>
-            </div>
-            """
-            return error_html, None, None, None
+        initial_items = feature_engineered_data[feature_engineered_data[store_col] == initial_store_id][item_col].unique()
 
-    # Create Gradio interface with proper layout
-    with gr.Blocks() as prediction_interface:
-        gr.Markdown("# 🔮 Sales Prediction Tool")
-        gr.Markdown("Generate sales forecasts based on historical data and market conditions")
+        if has_item_names:
+            initial_item_options = [
+                f"{item_id} - {item_names[item_id]}"
+                for item_id in initial_items
+                if item_id in item_names
+            ]
+        else:
+            initial_item_options = sorted(initial_items)
+    else:
+        initial_item_options = []
+
+    # Build Gradio interface
+    with gr.Blocks(title="Sales Prediction Tool") as demo:
+        gr.Markdown("# Sales Prediction Tool")
 
         with gr.Row():
-            # Left column - Inputs
+            # Left column - Product Selection
             with gr.Column(scale=1):
-                gr.Markdown("### Product Selection")
-
+                gr.Markdown("## Product Selection")
                 store_dropdown = gr.Dropdown(
                     choices=store_options,
-                    value=store_options[0] if store_options else None,
                     label="Select Store",
-                    interactive=True
+                    value=initial_store,
+                    interactive=True,
+                    allow_custom_value=False
                 )
-
-                # Get initial items for first store
-                if has_store_names:
-                    initial_store_id = int(store_options[0].split(" - ")[0])
-                else:
-                    initial_store_id = int(store_options[0])
-
-                initial_items = feature_engineered_data[
-                    feature_engineered_data[store_col] == initial_store_id
-                ][item_col].unique()
-
-                if has_item_names:
-                    initial_item_options = [
-                        f"{item_id} - {item_names[item_id]}"
-                        for item_id in sorted(initial_items)
-                        if item_id in item_names
-                    ]
-                else:
-                    initial_item_options = [str(item_id) for item_id in sorted(initial_items)]
-
                 item_dropdown = gr.Dropdown(
                     choices=initial_item_options,
-                    value=initial_item_options[0] if initial_item_options else None,
                     label="Select Product",
-                    interactive=True
+                    value=initial_item_options[0] if initial_item_options else None,
+                    interactive=True,
+                    allow_custom_value=False
                 )
 
                 # Update items when store changes
@@ -188,137 +158,146 @@ def create_sales_prediction_interface(data, model, feature_stats, feature_engine
                     outputs=[item_dropdown]
                 )
 
-                gr.Markdown("### Date & Conditions")
-
-                prediction_date = gr.Textbox(
-                    label="Prediction Date",
-                    value=(datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d"),
-                    placeholder="YYYY-MM-DD"
-                )
-
-                is_holiday = gr.Checkbox(label="Holiday", value=False)
-
-                gr.Markdown("### Special Events")
-
-                special_event = gr.Dropdown(
-                    choices=["None", "Sale/Promotion", "Local Event", "Inventory Clearance", "New Product Launch"],
-                    value="None",
-                    label="Special Event"
-                )
-
-                special_event_impact = gr.Slider(
-                    minimum=-70,
-                    maximum=200,
-                    value=0,
-                    step=5,
-                    label="Event Impact (%)",
-                    info="Adjust impact of special event on sales"
-                )
-
-                gr.Markdown("### Weather Conditions")
-
-                temperature = gr.Slider(
-                    minimum=-10.0,
-                    maximum=40.0,
-                    value=20.0,
-                    step=0.5,
-                    label="Temperature (°C)"
-                )
-
-                weather_condition = gr.Dropdown(
-                    choices=["Clear", "Cloudy", "Rainy", "Snowy", "Stormy"],
-                    value="Clear",
-                    label="Weather Condition"
-                )
-
-                humidity = gr.Slider(
-                    minimum=0,
-                    maximum=100,
-                    value=50,
-                    step=5,
-                    label="Humidity (%)"
-                )
-
-                gr.Markdown("### Market Conditions")
-
-                competition_level = gr.Radio(
-                    choices=["Low", "Medium", "High"],
-                    value="Medium",
-                    label="Competition Level"
-                )
-
-                supply_chain = gr.Radio(
-                    choices=["Constrained", "Normal", "Abundant"],
-                    value="Normal",
-                    label="Supply Chain Status"
-                )
-
-                predict_btn = gr.Button("🎯 Predict Sales", variant="primary", size="lg")
-
-            # Right column - Results
+            # Right column - Prediction Parameters
             with gr.Column(scale=2):
-                gr.Markdown("### Prediction Results")
-
-                result_output = gr.HTML(label="Results")
+                gr.Markdown("## Prediction Parameters")
 
                 with gr.Row():
-                    plot1_output = gr.Plot(label="Sales History")
-                    plot2_output = gr.Plot(label="Weekly Pattern")
+                    with gr.Column():
+                        prediction_date = gr.Textbox(
+                            label="Prediction Date (YYYY-MM-DD)",
+                            value=(datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d"),
+                            interactive=True
+                        )
+                        is_holiday = gr.Checkbox(label="Holiday", value=False, interactive=True)
+                        special_event = gr.Dropdown(
+                            choices=["None", "Sale/Promotion", "Local Event",
+                                   "Inventory Clearance", "New Product Launch"],
+                            label="Special Event",
+                            value="None",
+                            interactive=True
+                        )
+                        promotion_impact = gr.Slider(-50, 100, value=20, label="Promotion Impact (%)", interactive=True)
+                        event_impact = gr.Slider(-20, 50, value=10, label="Event Impact (%)", interactive=True)
+                        clearance_impact = gr.Slider(-70, 30, value=-10, label="Clearance Impact (%)", interactive=True)
+                        launch_impact = gr.Slider(0, 200, value=50, label="Launch Impact (%)", interactive=True)
 
-                plot3_output = gr.Plot(label="Feature Importance")
+                    with gr.Column():
+                        temperature = gr.Slider(-10.0, 40.0, value=20.0, label="Temperature (°C)", interactive=True)
+                        weather_condition = gr.Dropdown(
+                            choices=["Clear", "Cloudy", "Rainy", "Snowy", "Stormy"],
+                            label="Weather Condition",
+                            value="Clear",
+                            interactive=True
+                        )
+                        gr.Markdown("*Note: Weather impacts vary by product category*")
 
-        # Connect prediction button
+                    with gr.Column():
+                        humidity = gr.Slider(0, 100, value=50, label="Humidity (%)", interactive=True)
+                        competition_level = gr.Radio(
+                            choices=["Low", "Medium", "High"],
+                            label="Competition Level",
+                            value="Medium",
+                            interactive=True
+                        )
+                        supply_chain = gr.Radio(
+                            choices=["Constrained", "Normal", "Abundant"],
+                            label="Supply Chain Status",
+                            value="Normal",
+                            interactive=True
+                        )
+
+                predict_btn = gr.Button("Predict Sales", variant="primary")
+
+        # Output section
+        gr.Markdown("## Prediction Results")
+        with gr.Row():
+            result_text = gr.Textbox(label="Results", lines=10)
+            result_plot1 = gr.Plot(label="Sales History")
+
+        with gr.Row():
+            result_plot2 = gr.Plot(label="Weekly Pattern")
+            result_plot3 = gr.Plot(label="Feature Importance")
+
+        # Connect button to prediction function
         predict_btn.click(
-            fn=make_prediction,
+            fn=predict_sales,
             inputs=[
-                store_dropdown,
-                item_dropdown,
-                prediction_date,
-                is_holiday,
-                special_event,
-                special_event_impact,
-                temperature,
-                weather_condition,
-                humidity,
-                competition_level,
-                supply_chain
+                store_dropdown, item_dropdown, prediction_date, is_holiday,
+                special_event, promotion_impact, event_impact, clearance_impact,
+                launch_impact, temperature, weather_condition, humidity,
+                competition_level, supply_chain
             ],
-            outputs=[result_output, plot1_output, plot2_output, plot3_output]
+            outputs=[result_text, result_plot1, result_plot2, result_plot3]
         )
 
-    return prediction_interface
+    return demo
 
 
 def create_name_mappings(df, store_col, item_col, has_store_names, has_item_names):
     """Create mapping dictionaries for store and item names"""
+
     store_names = {}
     item_names = {}
 
     if has_store_names:
+        # Create store ID to name mapping
         for _, row in df[[store_col, "store_name"]].drop_duplicates().iterrows():
             store_names[row[store_col]] = row["store_name"]
 
     if has_item_names:
+        # Create item ID to name mapping
         for _, row in df[[item_col, "item_name"]].drop_duplicates().iterrows():
             item_names[row[item_col]] = row["item_name"]
 
     return store_names, item_names
 
 
-def calculate_prediction_parameters(
-    pred_date,
-    is_holiday,
-    special_event,
-    special_event_impact,
-    temperature,
-    weather_condition,
-    humidity,
-    competition_level,
-    supply_chain
+def create_product_selection_sidebar(
+    df,
+    stores,
+    store_col,
+    item_col,
+    has_store_names,
+    has_item_names,
+    store_names,
+    item_names,
 ):
-    """Calculate all prediction parameters"""
+    """Create sidebar for store and product selection"""
+    # This function is kept for compatibility but not used in Gradio version
+    # The logic is integrated into sales_prediction_view
+    pass
 
-    # Temperature category
+
+def collect_prediction_inputs():
+    """Collect all prediction inputs from the user"""
+    # This function is kept for compatibility but adapted for Gradio
+    # See collect_prediction_inputs_from_values instead
+    pass
+
+
+def collect_prediction_inputs_from_values(
+    prediction_date_str, is_holiday, special_event, promotion_impact,
+    event_impact, clearance_impact, launch_impact, temperature,
+    weather_condition, humidity, competition_level, supply_chain
+):
+    """Collect all prediction inputs from provided values"""
+
+    # Parse date
+    prediction_date = datetime.strptime(prediction_date_str, "%Y-%m-%d").date()
+
+    # Calculate special event factor
+    special_event_factor = 1.0
+    if special_event == "Sale/Promotion":
+        special_event_factor = promotion_impact / 100 + 1.0
+    elif special_event == "Local Event":
+        special_event_factor = event_impact / 100 + 1.0
+    elif special_event == "Inventory Clearance":
+        special_event_factor = clearance_impact / 100 + 1.0
+    elif special_event == "New Product Launch":
+        special_event_factor = launch_impact / 100 + 1.0
+
+    # Determine temperature category
     if temperature < 15:
         temp_category = "Cool"
     elif temperature < 25:
@@ -326,7 +305,7 @@ def calculate_prediction_parameters(
     else:
         temp_category = "Hot"
 
-    # Humidity level
+    # Determine humidity level
     if humidity < 40:
         humidity_level = "Low"
     elif humidity < 70:
@@ -334,8 +313,8 @@ def calculate_prediction_parameters(
     else:
         humidity_level = "High"
 
-    # Season
-    month = pred_date.month
+    # Calculate derived parameters
+    month = prediction_date.month
     if month in [3, 4, 5]:
         season = "spring"
     elif month in [6, 7, 8]:
@@ -345,13 +324,11 @@ def calculate_prediction_parameters(
     else:
         season = "winter"
 
-    quarter = (pred_date.month - 1) // 3 + 1
-    day_of_week = pred_date.weekday()
+    quarter = (prediction_date.month - 1) // 3 + 1
+    day_of_week = prediction_date.weekday()
     is_weekend = 1 if day_of_week >= 5 else 0
 
-    # Calculate adjustment factors
-    special_event_factor = 1.0 + (special_event_impact / 100) if special_event != "None" else 1.0
-
+    # Calculate factors
     weather_factor = {
         "Clear": 1.0,
         "Cloudy": 0.95,
@@ -364,6 +341,7 @@ def calculate_prediction_parameters(
     supply_factor = {"Constrained": 0.9, "Normal": 1.0, "Abundant": 1.05}
     weekend_factor = 1.15 if is_weekend else 1.0
 
+    # Combined adjustment factor
     adjustment_factor = (
         special_event_factor
         * weather_factor.get(weather_condition, 1.0)
@@ -373,7 +351,7 @@ def calculate_prediction_parameters(
     )
 
     return {
-        "date": pred_date,
+        "date": prediction_date,
         "is_holiday": is_holiday,
         "temperature": temperature,
         "temp_category": temp_category,
@@ -404,80 +382,86 @@ def generate_prediction(
     store_names,
     item_names,
 ):
-    """Generate sales prediction and return formatted results"""
+    """Generate sales prediction and display results"""
 
-    # Find recent samples
-    recent_samples = (
-        feature_engineered_data[
-            (feature_engineered_data[store_col] == store_id)
-            & (feature_engineered_data[item_col] == item_id)
-        ]
-        .sort_values("date", ascending=False)
-        .head(5)
-    )
+    try:
+        # Find recent samples for the same store-item combination
+        recent_samples = (
+            feature_engineered_data[
+                (feature_engineered_data[store_col] == store_id)
+                & (feature_engineered_data[item_col] == item_id)
+            ]
+            .sort_values("date", ascending=False)
+            .head(5)
+        )
 
-    if recent_samples.empty:
-        error_html = """
-        <div style='padding: 20px; background-color: #fee; border: 1px solid #c00; border-radius: 5px;'>
-            <h3>❌ No Historical Data</h3>
-            <p>No historical data found for this product-store combination.</p>
-        </div>
-        """
-        return error_html, None, None, None
+        if recent_samples.empty:
+            return "No historical data found for this product-store combination.", None, None, None
 
-    # Prepare input
-    input_row = prepare_prediction_input(recent_samples, prediction_inputs)
-    input_df = pd.DataFrame([input_row])
+        # Create input based on most recent sample
+        input_row = prepare_prediction_input(recent_samples, prediction_inputs)
 
-    # Get model features
-    if hasattr(model, "feature_name_"):
-        model_features = model.feature_name_
-    else:
-        model_features = [
-            col for col in input_df.columns
-            if col not in ["sales", "date", "variation_factor", "adjustment_factor"]
-        ]
+        # Create DataFrame for prediction
+        input_df = pd.DataFrame([input_row])
 
-    # Make prediction
-    X_pred = input_df[model_features]
-    base_prediction = model.predict(X_pred)[0]
+        # Get the features that the model expects
+        if hasattr(model, "feature_name_"):
+            model_features = model.feature_name_
+        else:
+            model_features = [
+                col
+                for col in input_df.columns
+                if col
+                not in ["sales", "date", "variation_factor", "adjustment_factor"]
+            ]
 
-    # Apply adjustments
-    adjusted_prediction = base_prediction
-    if "variation_factor" in input_row:
-        adjusted_prediction *= input_row["variation_factor"]
-    adjusted_prediction *= prediction_inputs["adjustment_factor"]
+        # Select only the features used by the model
+        X_pred = input_df[model_features]
 
-    # Get historical data
-    historical = feature_engineered_data[
-        (feature_engineered_data[store_col] == store_id)
-        & (feature_engineered_data[item_col] == item_id)
-    ].sort_values("date")
+        # Make prediction
+        base_prediction = model.predict(X_pred)[0]
 
-    # Generate HTML results
-    result_html = generate_result_html(
-        adjusted_prediction,
-        base_prediction,
-        store_id,
-        item_id,
-        prediction_inputs,
-        historical,
-        has_store_names,
-        has_item_names,
-        store_names,
-        item_names
-    )
+        # Apply adjustment factors
+        adjusted_prediction = base_prediction
 
-    # Generate plots
-    plot1 = create_history_plot(historical, prediction_inputs["date"], adjusted_prediction)
-    plot2 = create_weekly_pattern_plot(historical, prediction_inputs["date"])
-    plot3 = create_feature_importance_plot(model, model_features)
+        # Apply the variation factor if it exists
+        if "variation_factor" in input_row:
+            adjusted_prediction *= input_row["variation_factor"]
 
-    return result_html, plot1, plot2, plot3
+        # Apply adjustment factor from user inputs
+        if "adjustment_factor" in prediction_inputs:
+            adjusted_prediction *= prediction_inputs["adjustment_factor"]
+
+        # Display results
+        result_text, plot1, plot2, plot3 = display_prediction_results(
+            adjusted_prediction,
+            base_prediction,
+            store_id,
+            item_id,
+            prediction_inputs,
+            feature_engineered_data,
+            store_col,
+            item_col,
+            has_store_names,
+            has_item_names,
+            store_names,
+            item_names,
+            model,
+            model_features,
+        )
+
+        return result_text, plot1, plot2, plot3
+
+    except Exception as e:
+        import traceback
+        error_msg = f"Error making prediction: {str(e)}\n\n{traceback.format_exc()}"
+        return error_msg, None, None, None
 
 
 def prepare_prediction_input(recent_samples, prediction_inputs):
-    """Prepare input row for prediction"""
+    """Prepare input row for prediction based on recent sample and user inputs"""
+
+    # Create input row based on most recent sample
     input_row = recent_samples.iloc[0].copy()
 
     # Update with user inputs
@@ -487,17 +471,20 @@ def prepare_prediction_input(recent_samples, prediction_inputs):
     input_row["year"] = prediction_inputs["date"].year
     input_row["quarter"] = prediction_inputs["quarter"]
     input_row["is_holiday"] = int(prediction_inputs["is_holiday"])
+
+    # Add day of week information
     input_row["day_of_week"] = input_row["date"].dayofweek
     input_row["day_of_month"] = input_row["date"].day
     input_row["is_weekend"] = 1 if input_row["day_of_week"] >= 5 else 0
 
-    # Update weather
+    # Update actual temperature and humidity values if they exist in the dataframe
     if "temperature" in input_row:
         input_row["temperature"] = prediction_inputs["temperature"]
+
     if "humidity" in input_row:
         input_row["humidity"] = prediction_inputs["humidity"]
 
-    # Update categories
+    # Update temperature and humidity categories
     for category in ["Cool", "Warm", "Hot"]:
         if f"temp_category_{category}" in input_row:
             input_row[f"temp_category_{category}"] = (
@@ -510,170 +497,235 @@ def prepare_prediction_input(recent_samples, prediction_inputs):
                 1 if level == prediction_inputs["humidity_level"] else 0
             )
 
+    # Update season
     for s in ["spring", "summer", "fall", "winter", "wet"]:
         if f"season_{s}" in input_row:
             input_row[f"season_{s}"] = 1 if s == prediction_inputs["season"] else 0
 
-    input_row["variation_factor"] = 1.0 + np.random.uniform(-0.02, 0.02)
+    # Set a random variation factor
+    variation_factor = 1.0 + np.random.uniform(-0.02, 0.02)
+    input_row["variation_factor"] = variation_factor
 
     return input_row
 
 
-def generate_result_html(
-    prediction,
+def display_prediction_results(
+    prediction_value,
     base_prediction,
     store_id,
     item_id,
     prediction_inputs,
-    historical,
+    historical_data,
+    store_col,
+    item_col,
     has_store_names,
     has_item_names,
     store_names,
-    item_names
+    item_names,
+    model,
+    model_features,
 ):
-    """Generate HTML for prediction results"""
+    """Display prediction results with visualizations"""
 
-    # Calculate historical stats
-    avg_sales = historical["sales"].mean() if "sales" in historical.columns else 0
-    last_value = historical["sales"].iloc[-1] if len(historical) > 0 and "sales" in historical.columns else 0
-    max_sales = historical["sales"].max() if "sales" in historical.columns else 0
+    # Build result text
+    result_lines = []
+    result_lines.append("=" * 50)
+    result_lines.append("PREDICTION RESULTS")
+    result_lines.append("=" * 50)
+    result_lines.append(f"\nPredicted Sales: ${prediction_value:,.2f}")
 
-    # Format store/item names
-    store_name = store_names[store_id] if has_store_names else f"Store {store_id}"
-    item_name = item_names[item_id] if has_item_names else f"Item {item_id}"
+    if has_store_names:
+        result_lines.append(f"Store: {store_names[store_id]}")
+    else:
+        result_lines.append(f"Store ID: {store_id}")
 
-    html = f"""
-    <div style='padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 10px; margin-bottom: 20px;'>
-        <h2 style='margin: 0 0 10px 0;'>💰 Predicted Sales: ${prediction:,.2f}</h2>
-        <p style='margin: 5px 0; opacity: 0.9;'><strong>Store:</strong> {store_name}</p>
-        <p style='margin: 5px 0; opacity: 0.9;'><strong>Product:</strong> {item_name}</p>
-        <p style='margin: 5px 0; opacity: 0.9;'><strong>Date:</strong> {prediction_inputs['date'].strftime('%B %d, %Y')} ({prediction_inputs['season'].capitalize()})</p>
-        {f"<p style='margin: 5px 0; opacity: 0.9;'><strong>Holiday:</strong> Yes 🎉</p>" if prediction_inputs['is_holiday'] else ""}
-    </div>
+    if has_item_names:
+        result_lines.append(f"Product: {item_names[item_id]}")
+    else:
+        result_lines.append(f"Product ID: {item_id}")
 
-    <div style='display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;'>
-        <div style='padding: 15px; background-color: #f0f7ff; border-radius: 8px; border-left: 4px solid #0F6CBD;'>
-            <div style='font-size: 12px; color: #666; margin-bottom: 5px;'>Historical Average</div>
-            <div style='font-size: 24px; font-weight: bold; color: #0F6CBD;'>${avg_sales:,.2f}</div>
-        </div>
-        <div style='padding: 15px; background-color: #f0fff4; border-radius: 8px; border-left: 4px solid #2E7D32;'>
-            <div style='font-size: 12px; color: #666; margin-bottom: 5px;'>Last Recorded</div>
-            <div style='font-size: 24px; font-weight: bold; color: #2E7D32;'>${last_value:,.2f}</div>
-        </div>
-        <div style='padding: 15px; background-color: #fff0f0; border-radius: 8px; border-left: 4px solid #C4314B;'>
-            <div style='font-size: 12px; color: #666; margin-bottom: 5px;'>Historical Max</div>
-            <div style='font-size: 24px; font-weight: bold; color: #C4314B;'>${max_sales:,.2f}</div>
-        </div>
-    </div>
+    result_lines.append(f"Date: {prediction_inputs['date'].strftime('%B %d, %Y')}")
+    result_lines.append(f"Season: {prediction_inputs['season'].capitalize()}")
+    if prediction_inputs["is_holiday"]:
+        result_lines.append("Holiday: Yes")
 
-    <details style='padding: 15px; background-color: #fafafa; border-radius: 8px; margin-bottom: 20px;'>
-        <summary style='cursor: pointer; font-weight: bold; margin-bottom: 10px;'>📊 Adjustment Details</summary>
-        <div style='display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 10px;'>
-            <div><strong>Base Prediction:</strong> ${base_prediction:,.2f}</div>
-            <div><strong>Final Prediction:</strong> ${prediction:,.2f}</div>
-            <div><strong>Total Adjustment:</strong> {prediction_inputs['adjustment_factor']:.2f}x</div>
-            <div><strong>Event:</strong> {prediction_inputs['special_event']}</div>
-            <div><strong>Weather:</strong> {prediction_inputs['weather_condition']}</div>
-            <div><strong>Competition:</strong> {prediction_inputs['competition_level']}</div>
-            <div><strong>Supply Chain:</strong> {prediction_inputs['supply_chain']}</div>
-            <div><strong>Weekend:</strong> {'Yes' if prediction_inputs['is_weekend'] else 'No'}</div>
-        </div>
-    </details>
-    """
+    # Adjustment details
+    result_lines.append(f"\n{'='*50}")
+    result_lines.append("ADJUSTMENT DETAILS")
+    result_lines.append("="*50)
+    result_lines.append(f"Base prediction: ${base_prediction:.2f}")
+    result_lines.append(f"Final prediction: ${prediction_value:.2f}")
+    result_lines.append(f"Total adjustment: {prediction_inputs['adjustment_factor']:.2f}x")
+    result_lines.append(f"\nEvent: {prediction_inputs['special_event']}")
+    result_lines.append(f"Weather: {prediction_inputs['weather_condition']}")
+    result_lines.append(f"Competition: {prediction_inputs['competition_level']}")
+    result_lines.append(f"Supply: {prediction_inputs['supply_chain']}")
+    result_lines.append(f"Weekend: {'Yes' if prediction_inputs['is_weekend'] else 'No'}")
+    result_lines.append(f"Holiday: {'Yes' if prediction_inputs['is_holiday'] else 'No'}")
 
-    return html
+    # Get historical context
+    historical = historical_data[
+        (historical_data[store_col] == store_id)
+        & (historical_data[item_col] == item_id)
+    ].sort_values("date")
+
+    if "sales" in historical.columns and len(historical) > 0:
+        last_value = historical["sales"].iloc[-1]
+        last_date = historical["date"].iloc[-1]
+        avg_sales = historical["sales"].mean()
+        max_sales = historical["sales"].max()
+        max_date = historical.loc[historical["sales"].idxmax(), "date"]
+
+        result_lines.append(f"\n{'='*50}")
+        result_lines.append("HISTORICAL CONTEXT")
+        result_lines.append("="*50)
+        result_lines.append(f"Historical Average: ${avg_sales:,.2f}")
+        result_lines.append(f"Period: {historical['date'].min().strftime('%b %d, %Y')} to {historical['date'].max().strftime('%b %d, %Y')}")
+        result_lines.append(f"\nLast Recorded Sales: ${last_value:,.2f}")
+        result_lines.append(f"Date: {last_date.strftime('%b %d, %Y')}")
+        result_lines.append(f"\nHistorical Maximum: ${max_sales:,.2f}")
+        result_lines.append(f"Date: {max_date.strftime('%b %d, %Y')}")
+
+    result_text = "\n".join(result_lines)
+
+    # Create visualizations
+    plot1 = display_historical_context(historical, prediction_inputs["date"], prediction_value)
+    plot2 = display_weekly_pattern(historical, prediction_inputs["date"])
+    plot3 = display_feature_importance(model, model_features)
+
+    return result_text, plot1, plot2, plot3
 
 
-def create_history_plot(historical, prediction_date, prediction_value):
-    """Create sales history plot"""
-    if "sales" not in historical.columns or historical.empty:
+def display_historical_context(historical_data, prediction_date, prediction_value):
+    """Display historical context visualizations"""
+
+    if "sales" not in historical_data.columns or historical_data.empty:
         return None
 
-    last_date = historical["date"].max()
+    # Limit to last 2 months
+    last_date = historical_data["date"].max()
     two_months_ago = last_date - pd.Timedelta(days=60)
-    recent_history = historical[historical["date"] >= two_months_ago].copy()
+    recent_history = historical_data[historical_data["date"] >= two_months_ago].copy()
 
     if recent_history.empty:
         return None
 
-    fig, ax = plt.subplots(figsize=(10, 4))
+    # Plot recent sales history
+    fig, ax = plt.subplots(figsize=(6, 2.5))
 
-    ax.plot(recent_history["date"], recent_history["sales"], 'b-', label="Sales", linewidth=2)
-    ax.scatter(prediction_date, prediction_value, color="red", s=100, label="Prediction", zorder=5)
+    # Plot historical sales
+    ax.plot(
+        recent_history["date"],
+        recent_history["sales"],
+        "b-",
+        label="Sales",
+    )
 
+    # Add the prediction point
+    ax.scatter(
+        prediction_date,
+        prediction_value,
+        color="red",
+        s=60,
+        label="Prediction",
+    )
+
+    # Add moving average
     if len(recent_history) > 7:
         recent_history["MA7"] = recent_history["sales"].rolling(window=7).mean()
-        ax.plot(recent_history["date"], recent_history["MA7"], 'g--', label="7-Day Avg", alpha=0.7)
+        ax.plot(
+            recent_history["date"],
+            recent_history["MA7"],
+            "g--",
+            label="7-Day Avg",
+        )
 
-    ax.set_xlabel("Date", fontsize=10)
-    ax.set_ylabel("Sales ($)", fontsize=10)
-    ax.set_title("Last 60 Days Sales History", fontsize=12, fontweight='bold')
-    ax.legend(loc="upper left")
-    ax.grid(True, alpha=0.3)
+    ax.set_xlabel("")
+    ax.set_ylabel("Sales ($)")
+    ax.set_title("Last 60 Days Sales History")
+    ax.legend(loc="upper left", fontsize="x-small")
     fig.autofmt_xdate(rotation=45)
     fig.tight_layout()
 
     return fig
 
 
-def create_weekly_pattern_plot(historical, prediction_date):
-    """Create weekly pattern plot"""
-    if len(historical) < 7 or "sales" not in historical.columns:
+def display_weekly_pattern(recent_history, prediction_date):
+    """Display weekly sales pattern visualization"""
+
+    if len(recent_history) < 7:
         return None
 
-    recent_history = historical.copy()
+    # Add day of week
+    recent_history = recent_history.copy()
     recent_history["day_of_week"] = recent_history["date"].dt.dayofweek
-    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    day_names = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ]
 
+    # Group by day of week
     day_sales = recent_history.groupby("day_of_week")["sales"].mean()
-    day_sales_df = pd.DataFrame({
-        "day_name": [day_names[i] for i in range(7) if i in day_sales.index],
-        "sales": [day_sales[i] for i in range(7) if i in day_sales.index],
-    })
+    day_sales_df = pd.DataFrame(
+        {
+            "day_name": [day_names[i] for i in range(7) if i in day_sales.index],
+            "sales": [day_sales[i] for i in range(7) if i in day_sales.index],
+        }
+    )
 
-    fig, ax = plt.subplots(figsize=(10, 4))
+    # Plot
+    fig, ax = plt.subplots(figsize=(6, 2.5))
 
-    bars = ax.bar(day_sales_df["day_name"], day_sales_df["sales"])
+    # Plot day of week pattern
+    sns.barplot(x="day_name", y="sales", data=day_sales_df, ax=ax)
 
-    # Highlight prediction day
+    # Highlight the day of the prediction
     prediction_day = prediction_date.weekday()
-    for i, (bar, day_name) in enumerate(zip(bars, day_sales_df["day_name"])):
-        if day_name == day_names[prediction_day]:
-            bar.set_color('red')
-            bar.set_alpha(0.8)
+    for i, patch in enumerate(ax.patches):
+        if day_sales_df.iloc[i]["day_name"] == day_names[prediction_day]:
+            patch.set_facecolor("red")
 
-    ax.set_xlabel("Day of Week", fontsize=10)
-    ax.set_ylabel("Average Sales ($)", fontsize=10)
-    ax.set_title("Sales by Day of Week", fontsize=12, fontweight='bold')
-    ax.grid(True, alpha=0.3, axis='y')
-    plt.xticks(rotation=45)
+    ax.set_xlabel("")
+    ax.set_ylabel("Avg Sales ($)")
+    ax.set_title("Sales by Day of Week")
+    plt.xticks(rotation=45, fontsize=8)
     fig.tight_layout()
 
     return fig
 
 
-def create_feature_importance_plot(model, model_features):
-    """Create feature importance plot"""
+def display_feature_importance(model, model_features):
+    """Display feature importance visualization"""
+
     if not hasattr(model, "feature_importances_"):
         return None
 
+    # Get feature importances
     importances = model.feature_importances_
+
+    # Create DataFrame with feature importances
     importance_df = (
         pd.DataFrame({"Feature": model_features, "Importance": importances})
         .sort_values("Importance", ascending=False)
         .head(8)
     )
 
+    # Clean feature names for display
     importance_df["Feature"] = importance_df["Feature"].apply(
         lambda x: x.replace("_", " ").title()
     )
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    ax.barh(importance_df["Feature"], importance_df["Importance"], color='steelblue')
-    ax.set_xlabel("Importance", fontsize=10)
-    ax.set_ylabel("Feature", fontsize=10)
-    ax.set_title("Top Factors Influencing Sales Prediction", fontsize=12, fontweight='bold')
-    ax.grid(True, alpha=0.3, axis='x')
+    # Plot feature importances
+    fig, ax = plt.subplots(figsize=(6, 2.5))
+    sns.barplot(x="Importance", y="Feature", data=importance_df, ax=ax)
+    ax.set_title("Top Factors Influencing Sales Prediction")
+    plt.xticks(fontsize=8)
+    plt.yticks(fontsize=8)
     fig.tight_layout()
 
     return fig

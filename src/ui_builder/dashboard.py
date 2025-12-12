@@ -1,8 +1,8 @@
 import pandas as pd
 import gradio as gr
-import datetime
+import matplotlib.pyplot as plt
+from datetime import datetime
 
-# Strict import as requested
 from src.ui_builder.data_viz import (
     plot_category_distribution,
     plot_day_of_week_pattern,
@@ -11,280 +11,371 @@ from src.ui_builder.data_viz import (
     plot_store_comparison,
 )
 
-def filter_data(data, start_date_str, end_date_str, selected_store_val, selected_categories):
-    """Helper to filter data based on inputs"""
-    df = data.copy()
+# Mocking st.session_state for Gradio logic compatibility
+class SessionState(dict):
+    def __getattr__(self, item): return self.get(item)
+    def __setattr__(self, key, value): self[key] = value
 
-    # Convert string dates from Gradio to datetime.date
-    # Gradio DateTime/Textbox usually returns string YYYY-MM-DD or full timestamp
-    if isinstance(start_date_str, str):
-        start_date = pd.to_datetime(start_date_str).date()
-    else:
-        start_date = start_date_str.date() if hasattr(start_date_str, 'date') else start_date_str
+session_state = SessionState()
 
-    if isinstance(end_date_str, str):
-        end_date = pd.to_datetime(end_date_str).date()
-    else:
-        end_date = end_date_str.date() if hasattr(end_date_str, 'date') else end_date_str
+def configure_filters(data, start_date, end_date, selected_store_input, selected_categories):
+    """Logic-only version of configure_filters (removing st.sidebar calls)"""
 
-    # Date Filter
-    mask = (df["date"].dt.date >= start_date) & (df["date"].dt.date <= end_date)
-
-    # Store Filter logic
+    # Resolve store selection logic from the original code
+    selected_store = "All Stores"
     selected_store_name = "All Stores"
-    selected_store_id = "All Stores"
 
-    if selected_store_val != "All Stores":
-        if "store_name" in df.columns:
-            mask &= df["store_name"] == selected_store_val
-            selected_store_name = selected_store_val
-        elif "store" in df.columns:
-            mask &= df["store"].astype(str) == str(selected_store_val) # Ensure type match
-            selected_store_id = selected_store_val
+    if "store_name" in data.columns:
+        selected_store_name = selected_store_input
+    elif "store" in data.columns:
+        selected_store = selected_store_input
 
-    # Category Filter
-    if selected_categories and "category" in df.columns:
-        mask &= df["category"].isin(selected_categories)
+    # Filter data based on selection
+    filtered_data = data.copy()
 
-    return df[mask], selected_store_id, selected_store_name
+    # Gradio strings to datetime.date
+    start_dt = pd.to_datetime(start_date).date()
+    end_dt = pd.to_datetime(end_date).date()
 
-def generate_kpi_html(filtered_data, original_data, start_date, end_date):
-    """Generates HTML string for KPIs to mimic st.metric"""
+    mask = (filtered_data["date"].dt.date >= start_dt) & (
+        filtered_data["date"].dt.date <= end_dt
+    )
+
+    # Apply store filter
+    if "store_name" in data.columns and selected_store_name != "All Stores":
+        mask &= filtered_data["store_name"] == selected_store_name
+    elif "store" in data.columns and selected_store != "All Stores":
+        mask &= filtered_data["store"] == selected_store
+
+    # Apply category filter
+    if selected_categories:
+        mask &= filtered_data["category"].isin(selected_categories)
+
+    # Update state for other functions
+    session_state.selected_store = selected_store
+    session_state.selected_store_name = selected_store_name
+    session_state.start_date = start_dt
+    session_state.end_date = end_dt
+
+    return filtered_data[mask]
+
+def display_kpis(filtered_data):
+    """Logic-only version of display_kpis (returns strings for UI)"""
     total_sales = filtered_data["sales"].sum()
     avg_daily_sales = filtered_data.groupby("date")["sales"].sum().mean()
-    if pd.isna(avg_daily_sales): avg_daily_sales = 0
 
-    # Calculate transactions
+    if len(filtered_data["date"].unique()) >= 2:
+        mid_date = session_state.start_date + (session_state.end_date - session_state.start_date) / 2
+        period1_data = filtered_data[filtered_data["date"].dt.date <= mid_date]
+        period2_data = filtered_data[filtered_data["date"].dt.date > mid_date]
+        period1_sales = period1_data["sales"].sum() if not period1_data.empty else 0
+        period2_sales = period2_data["sales"].sum() if not period2_data.empty else 0
+        sales_change_pct = (((period2_sales - period1_sales) / period1_sales * 100) if period1_sales > 0 else 0)
+    else:
+        sales_change_pct = 0
+
     if "transactions" in filtered_data.columns:
         total_transactions = filtered_data["transactions"].sum()
     else:
         total_transactions = filtered_data.shape[0]
 
-    avg_txn_value = (total_sales / total_transactions) if total_transactions > 0 else 0
+    avg_transaction_value = (total_sales / total_transactions if total_transactions > 0 else 0)
 
-    # Calculate Delta (Approximate logic from original)
-    sales_change_pct = 0
-    unique_dates = filtered_data["date"].unique()
+    # Return formatted strings for Gradio Label/Textbox components
+    return (
+        total_sales,
+        sales_change_pct,
+        avg_daily_sales,
+        total_transactions,
+        avg_transaction_value
+    )
 
-    # Use the session dates passed in for mid-point calculation
-    s_date = pd.to_datetime(start_date).date() if isinstance(start_date, str) else start_date
-    e_date = pd.to_datetime(end_date).date() if isinstance(end_date, str) else end_date
+def display_sales_trends(filtered_data):
+    """Logic-only version of display_sales_trends (returns figures)"""
+    fig1 = plot_sales_time_series(
+        filtered_data,
+        session_state.selected_store,
+        session_state.selected_store_name,
+    )
 
-    if len(unique_dates) >= 2:
-        mid_date = s_date + (e_date - s_date) / 2
-        period1 = filtered_data[filtered_data["date"].dt.date <= mid_date]["sales"].sum()
-        period2 = filtered_data[filtered_data["date"].dt.date > mid_date]["sales"].sum()
+    fig2 = None
+    if len(filtered_data["date"].unique()) >= 7:
+        fig2 = plot_day_of_week_pattern(filtered_data)
 
-        if period1 > 0:
-            sales_change_pct = ((period2 - period1) / period1 * 100)
+    return fig1, fig2
 
-    # HTML styling for KPIs
-    delta_color = "green" if sales_change_pct >= 0 else "red"
-    delta_arrow = "↑" if sales_change_pct >= 0 else "↓"
+def display_performance_breakdown(filtered_data):
+    """Logic-only version of display_performance_breakdown (returns DF and Fig)"""
+    category_df = pd.DataFrame()
+    fig_cat = None
+    store_df = pd.DataFrame()
+    fig_store = None
 
-    html = f"""
-    <div style="display: flex; gap: 20px; text-align: center; justify-content: space-around; background: #f9fafb; padding: 20px; border-radius: 10px;">
-        <div>
-            <p style="color: gray; font-size: 0.9em; margin-bottom: 5px;">Total Sales</p>
-            <h2 style="margin: 0;">${total_sales:,.2f}</h2>
-            <small style="color: {delta_color}">{delta_arrow} {sales_change_pct:.1f}%</small>
-        </div>
-        <div>
-            <p style="color: gray; font-size: 0.9em; margin-bottom: 5px;">Avg Daily Sales</p>
-            <h2 style="margin: 0;">${avg_daily_sales:,.2f}</h2>
-        </div>
-        <div>
-            <p style="color: gray; font-size: 0.9em; margin-bottom: 5px;">Total Transactions</p>
-            <h2 style="margin: 0;">{total_transactions:,}</h2>
-        </div>
-        <div>
-            <p style="color: gray; font-size: 0.9em; margin-bottom: 5px;">Avg Txn Value</p>
-            <h2 style="margin: 0;">${avg_txn_value:,.2f}</h2>
-        </div>
+    if "category" in filtered_data.columns and len(filtered_data["category"].unique()) > 1:
+        category_sales = filtered_data.groupby("category")["sales"].sum().sort_values(ascending=False)
+        category_sales_pct = (category_sales / category_sales.sum() * 100).round(1)
+        category_df = pd.DataFrame({"Sales": category_sales, "Percentage": category_sales_pct}).reset_index()
+        category_df["Sales"] = category_df["Sales"].apply(lambda x: f"${x:,.2f}")
+        category_df["Percentage"] = category_df["Percentage"].apply(lambda x: f"{x}%")
+        fig_cat = plot_category_distribution(filtered_data)
+
+    if (session_state.selected_store_name == "All Stores" and session_state.selected_store == "All Stores") and \
+       ("store_name" in filtered_data.columns or "store" in filtered_data.columns):
+        store_identifier = "store_name" if "store_name" in filtered_data.columns else "store"
+        store_sales = filtered_data.groupby(store_identifier)["sales"].sum().sort_values(ascending=False)
+        top_stores = store_sales.head(10)
+        store_df = pd.DataFrame({"Store": top_stores.index, "Sales": top_stores.values})
+        store_df["Sales"] = store_df["Sales"].apply(lambda x: f"${x:,.2f}")
+        fig_store = plot_store_comparison(filtered_data, store_identifier)
+
+    return category_df, fig_cat, store_df, fig_store
+
+def format_kpi_html(label, value_str, delta_pct=None):
+    """Create HTML for metric"""
+
+    # Process Delta
+    delta_html = ""
+    if delta_pct is not None and delta_pct != 0:
+        if delta_pct > 0:
+            color = "color: #38a169;"  # Greenn
+            arrow = "▲"
+        else:
+            color = "color: #e53e3e;"  # Red
+            arrow = "▼"
+
+        # Format delta: Ví dụ: "▲ 4.2%"
+        delta_str = f"{arrow} {abs(delta_pct):.1f}%"
+        delta_html = f'<div style="{color} font-size: 14px; font-weight: 500; margin-top: 5px; line-height: 1;">{delta_str}</div>'
+
+    html_output = f"""
+    <div style="font-family: Arial, sans-serif; padding: 10px;">
+        <div style="font-size: 14px; color: #555; margin-bottom: 5px;">{label}</div>
+        <div style="font-size: 30px; font-weight: 600; color: #1a1a1a; line-height: 1;">{value_str}</div>
+        {delta_html}
     </div>
     """
-    return html
+    return html_output
 
-def prepare_category_table(filtered_data):
-    if "category" not in filtered_data.columns or filtered_data.empty:
-        return pd.DataFrame()
+def update_kpis_html(total_sales, sales_change_pct, avg_daily_sales, total_transactions, avg_transaction_value):
+    """wrapper function update KPI HTML"""
 
-    cat_sales = filtered_data.groupby("category")["sales"].sum().sort_values(ascending=False)
-    cat_pct = (cat_sales / cat_sales.sum() * 100).round(1)
+    html1 = format_kpi_html(
+        "💰 Total Sales",
+        f"${total_sales:,.2f}",
+        sales_change_pct
+    )
 
-    df = pd.DataFrame({"Sales": cat_sales, "Percentage": cat_pct}).reset_index()
-    # Note: Gradio DataFrame handles formatting better if we keep them as numbers,
-    # but to match st script exact formatting, we convert to string
-    df["Sales"] = df["Sales"].apply(lambda x: f"${x:,.2f}")
-    df["Percentage"] = df["Percentage"].apply(lambda x: f"{x}%")
-    return df
+    html2 = format_kpi_html(
+        "📊 Avg Daily Sales",
+        f"${avg_daily_sales:,.2f}"
+    )
 
-def prepare_store_table(filtered_data, selected_store_name):
-    if selected_store_name != "All Stores":
-        return pd.DataFrame() # Don't show store comparison if specific store selected
+    html3 = format_kpi_html(
+        "🛒 Total Transactions",
+        f"{total_transactions:,}"
+    )
 
-    store_col = "store_name" if "store_name" in filtered_data.columns else "store"
-    if store_col not in filtered_data.columns or filtered_data.empty:
-        return pd.DataFrame()
+    html4 = format_kpi_html(
+        "💵 Avg Transaction Value",
+        f"${avg_transaction_value:,.2f}"
+    )
 
-    store_sales = filtered_data.groupby(store_col)["sales"].sum().sort_values(ascending=False).head(10)
-    df = pd.DataFrame({"Store": store_sales.index, "Sales": store_sales.values})
-    df["Sales"] = df["Sales"].apply(lambda x: f"${x:,.2f}")
-    return df
+    return html1, html2, html3, html4
 
 def historical_sales_view(data):
-    """
-    Main entry point to launch the Gradio Dashboard.
-    Pass your dataframe 'data' here.
-    """
+    """Main Gradio Interface Builder"""
 
-    if data.empty:
-        print("No sales data available.")
-        return
+    def run_dashboard_update(start_date, end_date, store_selection, categories):
+        # 1. Logic: Filter
+        filtered_data = configure_filters(data, start_date, end_date, store_selection, categories)
 
-    # Pre-calculate filter options
-    min_date = data["date"].min().date()
-    max_date = data["date"].max().date()
+        if filtered_data.empty:
+            empty_msg = "⚠️ No data available for the selected filters. Please adjust your selections."
+            return [empty_msg] * 4 + [None] * 5 + [pd.DataFrame()]
 
-    store_options = ["All Stores"]
-    if "store_name" in data.columns:
-        store_options += sorted(list(data["store_name"].unique()))
-    elif "store" in data.columns:
-        store_options += sorted(list(data["store"].unique()))
-
-    cat_options = []
-    if "category" in data.columns:
-        cat_options = sorted(list(data["category"].unique()))
-
-    # --- THE UPDATE FUNCTION (The Engine) ---
-    def update_dashboard(start_date, end_date, store_selection, cat_selection):
-        # 1. Filter Data
-        filtered, sel_store_id, sel_store_name = filter_data(
-            data, start_date, end_date, store_selection, cat_selection
+        # 2. Logic: KPIs
+        kpi_metrics = display_kpis(filtered_data)
+        html1, html2, html3, html4 = update_kpis_html(
+            *kpi_metrics
         )
 
-        if filtered.empty:
-            # Return empty states/placeholders
-            return (
-                "<h3>No data available for selected filters</h3>", # KPI
-                None, None, # Trends
-                pd.DataFrame(), None, # Category
-                pd.DataFrame(), None, # Store
-                None, # Distribution
-                pd.DataFrame() # Raw Data
-            )
+        # 3. Logic: Trends
+        fig_ts, fig_dow = display_sales_trends(filtered_data)
 
-        # 2. KPIs
-        kpi_html = generate_kpi_html(filtered, data, start_date, end_date)
+        # 4. Logic: Breakdown
+        cat_df, fig_cat, store_df, fig_store = display_performance_breakdown(filtered_data)
 
-        # 3. Trends Plots
-        # Note: We pass the store identifier logic to match original script expectations
-        ts_fig = plot_sales_time_series(filtered, sel_store_id, sel_store_name)
+        # 5. Logic: Distribution
+        fig_dist = plot_sales_distribution(filtered_data)
 
-        dow_fig = None
-        if len(filtered["date"].unique()) >= 7:
-            dow_fig = plot_day_of_week_pattern(filtered)
-
-        # 4. Performance Breakdown
-        # Category
-        cat_df = prepare_category_table(filtered)
-        cat_fig = plot_category_distribution(filtered)
-
-        # Store Comparison (Only if All Stores selected)
-        store_df = prepare_store_table(filtered, sel_store_name)
-        store_fig = None
-        if sel_store_name == "All Stores":
-            store_col = "store_name" if "store_name" in data.columns else "store"
-            store_fig = plot_store_comparison(filtered, store_col)
-
-        # 5. Distribution
-        dist_fig = plot_sales_distribution(filtered)
-
-        # 6. Raw Data
-        raw_df = filtered.sort_values("date", ascending=False)
+        # 6. Logic: Table
+        detailed_table = filtered_data.sort_values("date", ascending=False)
 
         return (
-            kpi_html,
-            ts_fig, dow_fig,
-            cat_df, cat_fig,
-            store_df, store_fig,
-            dist_fig,
-            raw_df
+            html1, html2, html3, html4,
+            fig_ts, fig_dow,
+            cat_df, fig_cat,
+            store_df, fig_store,
+            fig_dist,
+            detailed_table
         )
 
-    # --- GRADIO UI LAYOUT ---
+    # Define the App Layout (Compatible with older Gradio versions)
     with gr.Blocks(title="Store Sales Dashboard") as demo:
-        gr.Markdown("# Store Sales Dashboard")
+        # Header
+        gr.Markdown(
+            """
+            # 📊 Store Sales Dashboard
+            ### Comprehensive sales analytics and performance insights
+            """
+        )
 
-        with gr.Row():
-            # Filters Sidebar (using Column to mimic sidebar)
-            with gr.Column(scale=1, min_width=250, variant="panel"):
-                gr.Markdown("### Filters")
-                # Gradio doesn't have a specific DateRange picker, so we use two inputs
-                date_start = gr.DateTime(label="From", value=min_date, type="datetime")
-                date_end = gr.DateTime(label="To", value=max_date, type="datetime")
+        # Left Sidebar - Filters (Fixed)
+        with gr.Sidebar(position="right"):
+                gr.Markdown("## 🔍 Dashboard Filters")
+                gr.Markdown("---")
 
-                dd_store = gr.Dropdown(choices=store_options, value="All Stores", label="Select Store")
-                dd_cat = gr.Dropdown(choices=cat_options, value=cat_options, multiselect=True, label="Select Categories")
+                # Date Filters
+                gr.Markdown("### 📅 Date Range")
+                min_date = data["date"].min().date()
+                max_date = data["date"].max().date()
 
-                btn_refresh = gr.Button("Update Dashboard", variant="primary")
-
-            # Main Content Area
-            with gr.Column(scale=4):
-                # KPI Section
-                out_kpi = gr.HTML()
+                start_in = gr.DateTime(
+                    label="From",
+                    value=str(min_date),
+                    type="string",
+                    interactive=True
+                )
+                end_in = gr.DateTime(
+                    label="To",
+                    value=str(max_date),
+                    type="string",
+                    interactive=True
+                )
 
                 gr.Markdown("---")
-                gr.Markdown("## Sales Trends")
-                with gr.Row():
-                    out_ts_plot = gr.Plot(label="Time Series")
-                    out_dow_plot = gr.Plot(label="Weekly Pattern")
 
-                gr.Markdown("## Performance Breakdown")
-                with gr.Row():
-                    with gr.Column():
-                        gr.Markdown("### Category Performance")
-                        out_cat_table = gr.DataFrame(interactive=False)
-                        out_cat_plot = gr.Plot()
-                    with gr.Column():
-                        gr.Markdown("### Store Comparison")
-                        out_store_table = gr.DataFrame(interactive=False)
-                        out_store_plot = gr.Plot()
+                # Store Filter
+                gr.Markdown("### 🏬 Store Selection")
+                if "store_name" in data.columns:
+                    opts = ["All Stores"] + sorted(data["store_name"].unique().tolist())
+                elif "store" in data.columns:
+                    opts = ["All Stores"] + sorted(data["store"].unique().tolist())
+                else:
+                    opts = ["All Stores"]
 
-                gr.Markdown("## Sales Distribution")
-                out_dist_plot = gr.Plot()
+                store_in = gr.Dropdown(
+                    choices=opts,
+                    value="All Stores",
+                    label="Select Store",
+                    interactive=True
+                )
 
-                with gr.Accordion("View Detailed Sales Data", open=False):
-                    out_raw_data = gr.DataFrame()
+                # Category Filter
+                cat_in = None
+                if "category" in data.columns:
+                    gr.Markdown("---")
+                    gr.Markdown("### 📦 Product Categories")
+                    cats = sorted(data["category"].unique().tolist())
+                    cat_in = gr.CheckboxGroup(
+                        choices=cats,
+                        value=cats,
+                        label="Select Categories",
+                        interactive=True
+                    )
 
-    # --- EVENT WIRING ---
-    # Trigger update on load and on button click
-    inputs = [date_start, date_end, dd_store, dd_cat]
-    outputs = [
-        out_kpi,
-        out_ts_plot, out_dow_plot,
-        out_cat_table, out_cat_plot,
-        out_store_table, out_store_plot,
-        out_dist_plot,
-        out_raw_data
-    ]
+                gr.Markdown("---")
+                btn = gr.Button("🔄 Update Dashboard", variant="primary", size="lg")
 
-    # Update when button clicked
-    btn_refresh.click(fn=update_dashboard, inputs=inputs, outputs=outputs)
+                gr.Markdown(
+                    """
+                    <br>
+                    💡 **Tip:** Adjust filters and click Update to refresh
+                    """
+                )
 
-    # Optional: Update immediately when filters change (mimics Streamlit's auto-rerun)
-    # If dataset is large, you might want to remove these lines and rely only on the button
-    dd_store.change(fn=update_dashboard, inputs=inputs, outputs=outputs)
-    dd_cat.change(fn=update_dashboard, inputs=inputs, outputs=outputs)
+        # Right Column - Main Dashboard
+        # with gr.Column():
+        # KPI Section
+        gr.Markdown("## 📈 Key Performance Indicators")
+        with gr.Row():
+            m1 = gr.HTML(label=None, scale=1, container=True)
+            m2 = gr.HTML(label=None, scale=1, container=True)
+            m3 = gr.HTML(label=None, scale=1, container=True)
+            m4 = gr.HTML(label=None, scale=1, container=True)
 
-    # Initialize view on load
-    demo.load(fn=update_dashboard, inputs=inputs, outputs=outputs)
+        gr.Markdown("---")
+
+        # Sales Trends Section
+        gr.Markdown("## 📉 Sales Trends Analysis")
+        with gr.Row():
+            p_ts = gr.Plot(label="📈 Sales Time Series", container=True, scale=1)
+            p_dow = gr.Plot(label="📅 Weekly Patterns", container=True, scale=1)
+
+        gr.Markdown("---")
+
+        # Performance Breakdown Section
+        gr.Markdown("## 🎯 Performance Breakdown")
+
+        # Category Performance Section
+        gr.Markdown("### 📦 Category Performance")
+        with gr.Row():
+            with gr.Column(scale=1):
+                df_cat = gr.DataFrame(label="Category Sales Data", max_height=300)
+            with gr.Column(scale=1):
+                p_cat = gr.Plot(label="Sales by Category", container=True)
+
+        gr.Markdown("---")
+
+        # Store Comparison Section
+        gr.Markdown("### 🏪 Store Comparison (Top 10)")
+        with gr.Row():
+            with gr.Column(scale=1):
+                df_store = gr.DataFrame(label="Top Performing Stores", max_height=300)
+            with gr.Column(scale=2):
+                p_store = gr.Plot(label="Top 10 Stores by Sales", container=True)
+
+        gr.Markdown("---")
+
+        # Sales Distribution Section
+        gr.Markdown("## 📊 Sales Distribution")
+        p_dist = gr.Plot(label="Distribution Analysis", container=True)
+
+        gr.Markdown("---")
+
+        # Detailed Data Section
+        with gr.Accordion("📋 View Detailed Sales Data", open=True):
+            gr.Markdown("*Complete transaction history for the selected period*")
+            df_detailed = gr.DataFrame(max_height=400)
+
+        # Footer
+        gr.Markdown(
+            """
+            ---
+            <div style='text-align: center; color: #666; font-size: 0.9em;'>
+            📊 Store Sales Dashboard | Powered by Gradio
+            </div>
+            """
+        )
+
+        # Link event - Update button
+        btn.click(
+            run_dashboard_update,
+            inputs=[start_in, end_in, store_in, cat_in],
+            outputs=[m1, m2, m3, m4, p_ts, p_dow, df_cat, p_cat, df_store, p_store, p_dist, df_detailed]
+        )
+
+        # Auto-load initial data on page load
+        demo.load(
+            run_dashboard_update,
+            inputs=[start_in, end_in, store_in, cat_in],
+            outputs=[m1, m2, m3, m4, p_ts, p_dow, df_cat, p_cat, df_store, p_store, p_dist, df_detailed]
+        )
 
     return demo
 
-# Example usage:
+# Usage:
 # if __name__ == "__main__":
-#     df = pd.read_csv("your_data.csv")
-#     df['date'] = pd.to_datetime(df['date'])
-#     demo = historical_sales_view(df)
-#     demo.launch()
+#     df = pd.read_csv("your_data.csv", parse_dates=['date'])
+#     app = historical_sales_view(df)
+#     app.launch()

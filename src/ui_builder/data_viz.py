@@ -50,7 +50,7 @@ def plot_sales_time_series(
     filtered_data, selected_store=None, selected_store_name=None
 ):
     """Generate time series plot of sales with moving average"""
-    fig, ax = plt.subplots(figsize=(6, 4))
+    fig, ax = plt.subplots(figsize=(7, 6))
 
     # Plot data based on store selection
     if selected_store_name == "All Stores" and selected_store == "All Stores":
@@ -102,7 +102,7 @@ def plot_sales_time_series(
 
 def plot_day_of_week_pattern(filtered_data):
     """Generate bar chart showing sales by day of week"""
-    fig, ax = plt.subplots(figsize=(6, 4))
+    fig, ax = plt.subplots(figsize=(7, 7))
 
     # Add day of week name
     day_names = [
@@ -149,7 +149,7 @@ def plot_day_of_week_pattern(filtered_data):
 
 def plot_category_distribution(filtered_data):
     """Generate pie chart of sales by category"""
-    fig, ax = plt.subplots(figsize=(6, 6))
+    fig, ax = plt.subplots(figsize=(8, 6))
 
     category_sales = (
         filtered_data.groupby("category")["sales"].sum().sort_values(ascending=False)
@@ -178,7 +178,7 @@ def plot_category_distribution(filtered_data):
 
 def plot_store_comparison(filtered_data, store_identifier="store"):
     """Generate horizontal bar chart for top stores by sales"""
-    fig, ax = plt.subplots(figsize=(6, 6))
+    fig, ax = plt.subplots(figsize=(12, 6))
 
     # Group by store
     store_sales = (
@@ -204,7 +204,7 @@ def plot_store_comparison(filtered_data, store_identifier="store"):
 
 def plot_sales_distribution(filtered_data):
     """Generate histogram with KDE and summary statistics"""
-    fig, ax = plt.subplots(figsize=(10, 4))
+    fig, ax = plt.subplots(figsize=(18, 4))
 
     # Create histogram with KDE
     sns.histplot(filtered_data["sales"], bins=30, kde=True, ax=ax)
